@@ -18,6 +18,8 @@ import re
 import json
 import os
 
+
+
 class wx_spider:
     def __init__(self):
         
@@ -53,7 +55,19 @@ class wx_spider:
         构造函数，借助搜狗微信搜索引擎，根据微信公众号获取微信公众号对应的文章的，发布时间、文章标题, 文章链接, 文章简介等信息
         :param Wechat_PublicID: 微信公众号
         '''
-        publicId = 'Fin2050'
+        
+        wxlist_file = open("txlist.txt",'r')
+        wxlist = []
+        try:
+            wxlist = wxlist_file.readlines()
+            if len(wxlist) == 0:
+                self.log(u'没有要抓取内容的公众号')
+                return;
+        finally:
+            wxlist_file.close()
+
+        # 先抓取第一个：'Fin2050'
+        publicId = wxlist[0]
 
         wxaccount = WxPublicAccount(account_id=publicId)
         # 第一步 ：GET请求到搜狗微信引擎，以微信公众号英文名称作为查询关键字
@@ -85,10 +99,8 @@ class wx_spider:
         
         if dbsession.query(WxPublicAccount).filter(WxPublicAccount.account_id==wxaccount.account_id).first() != '':
             # 记录已经存在则更新
-            self.log(u'执行到这里....1')
             dbsession.merge(wxaccount)
         else:
-            self.log(u'执行到这里....2')
             dbsession.add(wxaccount)
 
         dbsession.flush()
