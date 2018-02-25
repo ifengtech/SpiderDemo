@@ -4,7 +4,7 @@
 # 后台系统
 
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy import create_engine
 
@@ -25,20 +25,15 @@ class WxPublicAccount(Base):
     __tablename__ = 'wx_public_account'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(128))
+    name = Column(String(128), primary_key=True)
     account_id = Column(String(64),unique=True)
     account_img = Column(String(640), nullable=False)
     account_desc = Column(String(2048))
     account_qr = Column(String(640))
     account_url = Column(String(640), nullable=False)
-    #account_uptime = Column(Datetime())
-
-    '''
-    __table_args__ = (
-    UniqueConstraint('id', 'name', 'account_id', 'account_img', 'account_desc', 'account_qr', 'account_url'),
-        Index('ix_id_name', 'name', 'extra'),
-    )
-    '''
+    insert_date = Column(DateTime, nullable=False)
+    update_date = Column(DateTime)
+    
 
 class WxArticle(Base):
     """docstring for WxArticle"""
@@ -55,6 +50,7 @@ class WxArticle(Base):
     article_url = Column(String(640), nullable=False)
     article_pubtime = Column(String(32), nullable=False)
     article_account_id = Column(String(16), ForeignKey('wx_public_account.account_id'))
+    insert_date = Column(DateTime, nullable=False)
 
 
 #定义初始化数据库函数
