@@ -56,36 +56,56 @@ class wx_spider:
     
     # 爬取微信公众号详情信息
     # param: 公众号的Id
-    def crawlWxAccount(self, accountId = ''):
-        if accountId == '':
+    def crawlWxAccount(self, keyword = ''):
+        if keyword == '':
             return
 
-        wxaccount = WxPublicAccount(account_id=accountId)
+        wxaccount = WxPublicAccount()
         # 第一步 ：GET请求到搜狗微信引擎，以微信公众号英文名称作为查询关键字
-        self.log(u'开始获取公众号：%s' % wxaccount.account_id)
+        self.log(u'开始获取公众号：%s' % keyword)
         # self.log(u'开始调用sougou搜索引擎')
 
         # 拼接搜索地址
-        searchurl = self.composeSearchUrl(wxaccount.account_id)
-        self.log(u'%s 搜索链接：%s' % (wxaccount.account_id, searchurl))
+        searchurl = self.composeSearchUrl(keyword)
+        self.log(u'%s 搜索链接：%s' % (keyword, searchurl))
         sougou_search_html = self.session.get(searchurl, headers=self.headers, timeout=self.timeout).content
 
         # 第二步：从搜索结果页中解析出公众号主页链接
         doc = pq(sougou_search_html)
         
         # 通过pyquery的方式处理网页内容，类似用beautifulsoup，但是pyquery和jQuery的方法类似，找到公众号主页地址
-        wxaccount.name = doc('div[class=txt-box]')('p[class=tit]')('a').text().strip()
-        wxaccount.account_url = doc('div[class=txt-box]')('p[class=tit]')('a').attr('href')
-        wxaccount.account_img = doc('div[class=img-box]')('a')('img').attr('src')
-        wxaccount.account_desc = doc('ul[class=news-list2]')('li').eq(0)('dl').eq(0)('dd').text().strip()
-        wxaccount.account_qr = doc('div[class=ew-pop]')('span')('img').attr('src')
+        wxaccount.account_id = doc('div[class=txt-box]').eq(0)('p[class=info]')('label').text().strip()
+        wxaccount.name = doc('div[class=txt-box]').eq(0)('p[class=tit]')('a').text().strip()
+        wxaccount.account_url = doc('div[class=txt-box]').eq(0)('p[class=tit]')('a').attr('href')
+        wxaccount.account_img = doc('div[class=img-box]').eq(0)('a')('img').attr('src')
+        wxaccount.account_desc = doc('ul[class=news-list2]').eq(0)('li').eq(0)('dl').eq(0)('dd').text().strip()
+        wxaccount.account_qr = doc('div[class=ew-pop]').eq(0)('span')('img').attr('src')
         #wxaccount.account_uptime
 
         if wxaccount.name == '':
             self.log(u'获取公众号:%s 失败' % wxaccount.account_id)
             return None
 
-        return wxaccount
+        # 将爬取的公共号信息保存服务器
+        tmpRow = dbsession.query(WxPublicAccount).filter(WxPublicAccount.account_id==wxaccount.account_id).first()
+        if tmpRow is not None:
+            # 记录已经存在则更新
+            tmpRow.name = wxaccount.name
+            tmpRow.account_url = wxaccount.account_url
+            tmpRow.account_img = wxaccount.account_img
+            tmpRow.account_desc = wxaccount.account_desc
+            tmpRow.account_qr = wxaccount.account_qr
+            tmpRow.update_date = datetime.now()
+            #dbsession.merge(wxaccount)
+
+        else:
+            # 插入新的公众号账号
+            wxaccount.insert_date = datetime.now()
+            wxaccount.update_date = datetime.now()
+            dbsession.add(wxaccount)
+
+        # 保存
+        dbsession.commit()
         
 
     # 爬取微信公众号消息列表
@@ -96,7 +116,7 @@ class wx_spider:
         # self.log(u'开始调用selenium渲染html')
         browser = webdriver.PhantomJS()
         browser.get(wxaccount.account_url)
-        time.sleep(3)
+        time.sleep(1)
         # 执行js得到整个页面内容
         selenium_html = browser.execute_script("return document.documentElement.outerHTML")
         browser.close()
@@ -112,10 +132,9 @@ class wx_spider:
             # self.log(u'调用selenium渲染html完成，开始解析公众号文章')
             doc = pq(selenium_html)
 
-            wx_article_list = []
-
             articles_list = doc('div[class="weui_media_box appmsg"]')
             articlesLength = len(articles_list)
+            
             # self.log(u'抓取到微信文章%d篇' % articlesLength)
 
             # Step 6: 把微信文章数据封装成字典的list
@@ -123,19 +142,20 @@ class wx_spider:
 
             # 遍历找到的文章，解析里面的内容
             if articles_list:
-                self.log(u'开始获取公众号文章列表：%s' % wxaccount.account_id)
+                self.log(u'开始获取公众号文章列表：%s' % wxaccount.name)
                 index = 0
                 article_index = WxArticle(article_account_id=wxaccount.account_id)
                 
-                for article in articles_list.items():
+                # 按发布时间倒序遍历
+                for article in reversed(list(articles_list.items())):
+                    
                     # self.log(' ' )
                     # self.log(u'开始整合(%d/%d)' % (index, articlesLength))
                     index += 1
                     article_index = WxArticle(article_account_id=wxaccount.account_id)
 
-                    # 处理单个文章
                     # 获取标题
-                    article_index.article_title = article('h4[class="weui_media_title"]').text().strip()
+                    article_index.article_title = article('h4[class="weui_media_title"]').remove('span').text().strip()
                     # self.log(u'标题是： %s' % article_index.article_title)
                     
                     # 获取概要内容
@@ -160,19 +180,24 @@ class wx_spider:
                     # self.log(u'地址为： %s' % article_index.article_url)
 
                     # 获取文章发表时间
-                    article_index.article_pubtime = article('p[class="weui_media_extra_info"]').text().strip()
+                    article_index.article_pubtime = article('p[class="weui_media_extra_info"]').remove('span').text().strip()
                     # self.log(u'发表时间为： %s' % article_index.article_pubtime)
                     
-                    # 更新时间
-                    article_index.insert_date = datetime.now()
-                    articles_list.append(article_index)
-
-                # 返回爬取的结果
-                return articles_list
-
-            else:
-                self.log(u'[w] 抓取的内容为空')
-                return None
+                    tmpRow = dbsession.query(WxArticle).filter(WxArticle.article_title==article_index.article_title, WxArticle.article_account_id==article_index.article_account_id).first()
+                    if tmpRow is not None:
+                        tmpRow.article_url = article_index.article_url
+                        tmpRow.update_date = datetime.now()
+                        
+                    else:
+                        # 更新时间
+                        article_index.insert_date = datetime.now()
+                        article_index.update_date = datetime.now()
+                        dbsession.add(article_index)
+                    
+                    dbsession.flush()
+            
+                # 提交数据库保存
+                dbsession.commit()
                 
 
     def run(self):
@@ -197,35 +222,8 @@ class wx_spider:
         self.log(u'<1> 爬取公众号列表详情')
         for wxid in wxlist:
             wxid = wxid.strip()
-            wxaccount = self.crawlWxAccount(accountId = wxid)
+            self.crawlWxAccount(keyword = wxid)
 
-            if wxaccount is not None:
-                continue
-            else:
-                # 将爬取的公共号信息保存服务器
-                tmpRow = dbsession.query(WxPublicAccount).filter(WxPublicAccount.account_id==wxaccount.account_id).first()
-                if tmpRow is not None:
-                    # 记录已经存在则更新
-                    tmpRow.name = wxaccount.name
-                    tmpRow.account_url = wxaccount.account_url
-                    tmpRow.account_img = wxaccount.account_img
-                    tmpRow.account_desc = wxaccount.account_desc
-                    tmpRow.account_qr = wxaccount.account_qr
-                    tmpRow.update_date = datetime.now()
-                    #dbsession.merge(wxaccount)
-
-                else:
-                    # 插入新的公众号账号
-                    wxaccount.insert_date = datetime.now()
-                    wxaccount.update_date = datetime.now()
-                    dbsession.add(wxaccount)
-
-                # 保存
-                dbsession.flush()
-         
-        # 公众号列表爬取完成，同步数据库       
-        dbsession.flush()
-        dbsession.commit()
         self.log(u'</1> 公众号详情列表爬取完成.')
         
         # 接下来爬取服务器存储的所有公众号的最近消息
@@ -236,23 +234,8 @@ class wx_spider:
             
         else:
             for tmpAccount in accountList:
-                wxarticleList = self.crawlWxArticle(tmpAccount)
-                if wxarticleList is None or len(wxarticleList):
-                    continue
-                else:
-                    for tmpArticle in wxarticleList:
-                        # 去重复存储数据库
-                        tmpRow = dbsession.query(WxArticle).filter(WxArticle.article_title==tmpArticle.article_title, WxArticle.article_account_id==tmpArticle.article_account_id).first()
-                        if tmpRow is not None:
-                            continue
-                        else:
-                            dbsession.add(tmpArticle)
-                    # 保存
-                    dbsession.flush()
-
-            # 提交服务器
-            dbsession.flush()
-            dbsession.commit()
+                self.crawlWxArticle(tmpAccount)
+                
             self.log(u'</2> 爬取公众号最近消息列表完成')
 
         self.log(u'……本次爬取完成，程序结束')

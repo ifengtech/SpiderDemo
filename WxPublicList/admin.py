@@ -51,7 +51,7 @@ class WxArticle(Base):
     article_pubtime = Column(String(32), nullable=False)
     article_account_id = Column(String(16), ForeignKey('wx_public_account.account_id'))
     insert_date = Column(DateTime, nullable=False)
-
+    update_date = Column(DateTime)
 
 #定义初始化数据库函数
 def init_db():
